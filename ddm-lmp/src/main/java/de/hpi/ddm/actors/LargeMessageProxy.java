@@ -5,10 +5,12 @@ import java.io.Serializable;
 import akka.actor.AbstractLoggingActor;
 import akka.actor.ActorRef;
 import akka.actor.ActorSelection;
+import akka.serialization.*;
 import akka.actor.Props;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
 
 public class LargeMessageProxy extends AbstractLoggingActor {
 
@@ -37,6 +39,8 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 	public static class BytesMessage<T> implements Serializable {
 		private static final long serialVersionUID = 4057807743872319842L;
 		private T bytes;
+		private String manifest;
+		private int serializerID;
 		private ActorRef sender;
 		private ActorRef receiver;
 	}
@@ -72,11 +76,23 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		// 2. Serialize the object and send its bytes via Akka streaming.
 		// 3. Send the object via Akka's http client-server component.
 		// 4. Other ideas ...
-		receiverProxy.tell(new BytesMessage<>(message.getMessage(), this.sender(), message.getReceiver()), this.self());
+		
+		// Serialize the object with the akka.serializable library
+		Serialization serialization = SerializationExtension.get(this.getContext().getSystem());
+		
+		byte[] bytes = serialization.serialize(message.getMessage()).get();
+		int serializerID = serialization.findSerializerFor(message.getMessage()).identifier();
+		String manifest = Serializers.manifestFor(serialization.findSerializerFor(message.getMessage()), message.getMessage());
+		
+		receiverProxy.tell(new BytesMessage<>(bytes, manifest, serializerID, this.sender(), message.getReceiver()), this.self());
 	}
 
 	private void handle(BytesMessage<?> message) {
 		// Reassemble the message content, deserialize it and/or load the content from some local location before forwarding its content.
-		message.getReceiver().tell(message.getBytes(), message.getSender());
+		Serialization serialization = SerializationExtension.get(this.getContext().getSystem());
+				
+		val mes =  serialization.deserialize(message.bytes, message.serializerID, message.manifest).get();
+
+		message.getReceiver().tell(mes, message.getSender());
 	}
 }
