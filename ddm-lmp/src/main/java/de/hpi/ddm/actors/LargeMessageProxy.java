@@ -10,6 +10,7 @@ import akka.actor.Props;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.var;
 
 
 public class LargeMessageProxy extends AbstractLoggingActor {
@@ -91,7 +92,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		// Reassemble the message content, deserialize it and/or load the content from some local location before forwarding its content.
 		Serialization serialization = SerializationExtension.get(this.getContext().getSystem());
 				
-		val mes =  serialization.deserialize(message.bytes, message.serializerID, message.manifest).get();
+		Object mes =  serialization.deserialize( (byte[]) message.bytes, message.serializerID, message.manifest).get();
 
 		message.getReceiver().tell(mes, message.getSender());
 	}
