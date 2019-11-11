@@ -10,8 +10,6 @@ import akka.actor.Props;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import lombok.var;
-
 
 public class LargeMessageProxy extends AbstractLoggingActor {
 
@@ -74,7 +72,7 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		// This will definitely fail in a distributed setting if the serialized message is large!
 		// Solution options:
 		// 1. Serialize the object and send its bytes batch-wise (make sure to use artery's side channel then).
-		// 2. Serialize the object and send its bytes via Akka streaming.
+		// 2. Serialize the object and send its bytes via Akka streaming. - CHECK - HAVE TO TEST
 		// 3. Send the object via Akka's http client-server component.
 		// 4. Other ideas ...
 		
@@ -84,16 +82,19 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		byte[] bytes = serialization.serialize(message.getMessage()).get();
 		int serializerID = serialization.findSerializerFor(message.getMessage()).identifier();
 		String manifest = Serializers.manifestFor(serialization.findSerializerFor(message.getMessage()), message.getMessage());
-		
+
 		receiverProxy.tell(new BytesMessage<>(bytes, manifest, serializerID, this.sender(), message.getReceiver()), this.self());
 	}
 
 	private void handle(BytesMessage<?> message) {
-		// Reassemble the message content, deserialize it and/or load the content from some local location before forwarding its content.
+		// Reassemble the message content, deserialize it and/or load the content from some local location before forwarding its content. -check
 		Serialization serialization = SerializationExtension.get(this.getContext().getSystem());
 				
-		Object mes =  serialization.deserialize( (byte[]) message.bytes, message.serializerID, message.manifest).get();
+		Object mes =  serialization.deserialize((byte[]) message.bytes, message.serializerID, message.manifest).get();
 
 		message.getReceiver().tell(mes, message.getSender());
 	}
 }
+
+//TODO: Include ByteBuffer ?
+//https://doc.akka.io/docs/akka/current/remoting-artery.html#bytebuffer-based-serialization
