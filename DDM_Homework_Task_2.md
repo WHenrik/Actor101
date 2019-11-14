@@ -6,12 +6,12 @@ Producer
 
 1. serialize the message
 
-2. chunk byte array into array chunks of length 8096
+2. chunk byte array into array chunks of (at most) length 8096
 
-3. sending object including chunks, manifest, serializerID, sender, recent chunk number and number of expected chunks
+3. send chunks of a message consecutively by sending objects including a serialized messagechunk, manifest, serializerID, sender, current chunk number and number of total expected chunks for this message
 
 Consumer
 
-1. gets message and collecting byte chunks based on chunk number and number of expected chunks into one byte array
+1. gets message chunkwise, collects byte chunks and reassembles the message based on chunk number and number of expected chunks into one byte array
 
-2. deserializing whole message
+2. deserializes whole message
