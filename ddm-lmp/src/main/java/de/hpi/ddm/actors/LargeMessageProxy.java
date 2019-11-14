@@ -82,7 +82,6 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 		// Solution option:
 		// 1. Serialize the object and send its bytes batch-wise (make sure to use artery's side channel then).
 
-		
 		// Serialize the object with the akka.serializable library
 		Serialization serialization = SerializationExtension.get(this.getContext().getSystem());
 		
@@ -102,16 +101,12 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 	private void handle(BytesMessage<?> message) {
 		// Reassemble the message content, deserialize it and/or load the content from some local location before forwarding its content.
 
-		// ******* should be deleted before delivery ********
-		System.out.println("1. "+ message.messagecount + "    2. " + message.endcount);
-
 		//collects the array chunks and brings them together
 		if(message.messagecount<message.endcount){
 			byte[] test = (byte[]) message.bytes;
 			try {
 				messageBuffer.write(test);
 			} catch (IOException e) {
-				System.out.println("FEHLER!!!!");
 				e.printStackTrace();
 			}
 		}
