@@ -4,6 +4,7 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.ArrayList;
 
 import akka.actor.AbstractLoggingActor;
 import akka.actor.ActorRef;
@@ -30,6 +31,9 @@ public class Master extends AbstractLoggingActor {
 		this.reader = reader;
 		this.collector = collector;
 		this.workers = new ArrayList<>();
+		this.freeWorkers = new ArrayList<>();
+
+		this.toCrack = new ArrayList<>();
 	}
 
 	////////////////////
@@ -39,6 +43,12 @@ public class Master extends AbstractLoggingActor {
 	@Data
 	public static class StartMessage implements Serializable {
 		private static final long serialVersionUID = -50374816448627600L;
+	}
+	
+	@Data @NoArgsConstructor @AllArgsConstructor
+	public static class ResultMessage implements Serializable {
+		private static final long serialVersionUID = -4884396984570239244L;
+		private String[] result;
 	}
 	
 	@Data @NoArgsConstructor @AllArgsConstructor
@@ -59,8 +69,10 @@ public class Master extends AbstractLoggingActor {
 	private final ActorRef reader;
 	private final ActorRef collector;
 	private final List<ActorRef> workers;
+	private final List<ActorRef> freeWorkers;
 
 	private long startTime;
+	private List<String[]> toCrack;
 	
 	/////////////////////
 	// Actor Lifecycle //
@@ -82,6 +94,7 @@ public class Master extends AbstractLoggingActor {
 				.match(BatchMessage.class, this::handle)
 				.match(Terminated.class, this::handle)
 				.match(RegistrationMessage.class, this::handle)
+				.match(ResultMessage.class, this::handle)
 				.matchAny(object -> this.log().info("Received unknown message: \"{}\"", object.toString()))
 				.build();
 	}
@@ -103,15 +116,50 @@ public class Master extends AbstractLoggingActor {
 		
 		if (message.getLines().isEmpty()) {
 			this.collector.tell(new Collector.PrintMessage(), this.self());
-			this.terminate();
+			//this.terminate();
 			return;
 		}
 		
-		for (String[] line : message.getLines())
-			System.out.println(Arrays.toString(line));
+		for (String[] line : message.getLines()) {
+			//System.out.println(Arrays.toString(line));
+			toCrack.add(line);
+		}
+		this.distribute();
+		
 		
 		this.collector.tell(new Collector.CollectMessage("Processed batch of size " + message.getLines().size()), this.self());
 		this.reader.tell(new Reader.ReadMessage(), this.self());
+	}
+	
+	protected void distribute() {
+		List<ActorRef> toRemove = new ArrayList<ActorRef>();
+		for (ActorRef worker : this.freeWorkers) {
+			if (this.toCrack.isEmpty()) {
+				this.reader.tell(new Reader.ReadMessage(), this.self());
+				return;
+			} else {
+				worker.tell(new Worker.TaskMessage(this.toCrack.get(0)), this.self());
+				this.toCrack.remove(0);
+				toRemove.add(worker);
+			}
+		}
+		for (ActorRef worker : toRemove) {
+			this.freeWorkers.remove(worker);
+		}
+	}
+	
+	// Receive result from a worker, and give it a new task if there are some left
+	protected void handle(ResultMessage message) {
+		String name = message.getResult()[0];
+		String password = message.getResult()[1];
+		collector.tell(new Collector.CollectMessage("Cracked " + name + ": " + password), this.self());
+		
+		this.freeWorkers.add(this.sender());
+		this.distribute();
+		
+		if (this.toCrack.isEmpty() && this.freeWorkers.size() == this.workers.size()) {
+			this.terminate();
+		}
 	}
 	
 	protected void terminate() {
@@ -132,12 +180,14 @@ public class Master extends AbstractLoggingActor {
 	protected void handle(RegistrationMessage message) {
 		this.context().watch(this.sender());
 		this.workers.add(this.sender());
+		this.freeWorkers.add(this.sender());
 //		this.log().info("Registered {}", this.sender());
 	}
 	
 	protected void handle(Terminated message) {
 		this.context().unwatch(message.getActor());
 		this.workers.remove(message.getActor());
+		this.freeWorkers.remove(message.getActor());
 //		this.log().info("Unregistered {}", message.getActor());
 	}
 }

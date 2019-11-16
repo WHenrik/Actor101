@@ -1,9 +1,12 @@
 package de.hpi.ddm.actors;
 
+import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
+import java.util.ListIterator;
+import java.util.ArrayList;
 
 import akka.actor.AbstractLoggingActor;
 import akka.actor.ActorRef;
@@ -16,6 +19,9 @@ import akka.cluster.ClusterEvent.MemberUp;
 import akka.cluster.Member;
 import akka.cluster.MemberStatus;
 import de.hpi.ddm.MasterSystem;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 public class Worker extends AbstractLoggingActor {
 
@@ -36,6 +42,13 @@ public class Worker extends AbstractLoggingActor {
 	////////////////////
 	// Actor Messages //
 	////////////////////
+	
+	@Data @NoArgsConstructor @AllArgsConstructor
+	public static class TaskMessage implements Serializable {
+		private static final long serialVersionUID = 8343040942748609598L;
+		private String[] line;
+	}
+
 
 	/////////////////
 	// Actor State //
@@ -70,8 +83,28 @@ public class Worker extends AbstractLoggingActor {
 				.match(CurrentClusterState.class, this::handle)
 				.match(MemberUp.class, this::handle)
 				.match(MemberRemoved.class, this::handle)
+				.match(TaskMessage.class, this::handle)
 				.matchAny(object -> this.log().info("Received unknown message: \"{}\"", object.toString()))
 				.build();
+	}
+	
+	private void handle(TaskMessage message) {
+		String[] task = message.getLine();
+		int id = Integer.parseInt(task[0]);
+		String name = task[1];
+		this.log().info("Received task for " + name);
+		String passwordHash = task[2];
+		int passwordLength = Integer.parseInt(task[3]);
+		String[] hintsHashes = new String[task.length];
+		for (int ii=4; ii < task.length; ii++) {
+			hintsHashes[ii-4] = task[ii];
+			//this.log().info(task[ii]);
+		}
+		
+		// Here be cracking!
+		
+		String[] output = {name, "randomPassword"};
+		this.sender().tell(new Master.ResultMessage(output), this.self());
 	}
 
 	private void handle(CurrentClusterState message) {
