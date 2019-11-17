@@ -134,10 +134,7 @@ public class Master extends AbstractLoggingActor {
 	protected void distribute() {
 		List<ActorRef> toRemove = new ArrayList<ActorRef>();
 		for (ActorRef worker : this.freeWorkers) {
-			if (this.toCrack.isEmpty()) {
-				this.reader.tell(new Reader.ReadMessage(), this.self());
-				return;
-			} else {
+			if (!this.toCrack.isEmpty()) {
 				worker.tell(new Worker.TaskMessage(this.toCrack.get(0)), this.self());
 				this.toCrack.remove(0);
 				toRemove.add(worker);
@@ -152,12 +149,14 @@ public class Master extends AbstractLoggingActor {
 	protected void handle(ResultMessage message) {
 		String name = message.getResult()[0];
 		String password = message.getResult()[1];
+		this.log().info("Cracked " + name + ": " + password);
 		collector.tell(new Collector.CollectMessage("Cracked " + name + ": " + password), this.self());
 		
 		this.freeWorkers.add(this.sender());
 		this.distribute();
 		
 		if (this.toCrack.isEmpty() && this.freeWorkers.size() == this.workers.size()) {
+			this.log().info("Terminated because empty and done: " + String.valueOf(this.toCrack.size()));
 			this.terminate();
 		}
 	}
@@ -181,6 +180,7 @@ public class Master extends AbstractLoggingActor {
 		this.context().watch(this.sender());
 		this.workers.add(this.sender());
 		this.freeWorkers.add(this.sender());
+		this.distribute();
 //		this.log().info("Registered {}", this.sender());
 	}
 	
