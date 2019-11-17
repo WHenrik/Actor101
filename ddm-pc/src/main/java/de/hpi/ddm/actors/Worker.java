@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.ListIterator;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Hashtable;
+import java.util.HashSet;
 
 import akka.actor.AbstractLoggingActor;
 import akka.actor.ActorRef;
@@ -49,6 +51,25 @@ public class Worker extends AbstractLoggingActor {
 		private static final long serialVersionUID = 8343040942748609598L;
 		private String[] line;
 	}
+	
+	@Data @NoArgsConstructor @AllArgsConstructor
+	public static class HashMessage implements Serializable {
+		private static final long serialVersionUID = 6560207097470814017L;
+		private String character;
+		private List<String> passwordChars;
+	}
+	
+	@Data @NoArgsConstructor @AllArgsConstructor
+	public static class HintsHashesMessage implements Serializable {
+		private static final long serialVersionUID = -7425329313563534330L;
+		private List<String> allHints;
+	}
+
+	@Data @NoArgsConstructor @AllArgsConstructor
+	public static class CrackedHintsMessage implements Serializable {
+		private static final long serialVersionUID = -719107220168245254L;
+		private Hashtable<String,String> crackedHints;
+	}
 
 
 	/////////////////
@@ -57,6 +78,8 @@ public class Worker extends AbstractLoggingActor {
 
 	private Member masterSystem;
 	private final Cluster cluster;
+	private List<String> hintsHashes;
+	private Hashtable<String,String> crackedHints;
 	
 	/////////////////////
 	// Actor Lifecycle //
@@ -85,69 +108,84 @@ public class Worker extends AbstractLoggingActor {
 				.match(MemberUp.class, this::handle)
 				.match(MemberRemoved.class, this::handle)
 				.match(TaskMessage.class, this::handle)
+				.match(HashMessage.class, this::handle)
+				.match(HintsHashesMessage.class, this::handle)
+				.match(CrackedHintsMessage.class, this::handle)
 				.matchAny(object -> this.log().info("Received unknown message: \"{}\"", object.toString()))
 				.build();
+	}
+
+	private void handle(HashMessage message) {
+		String cc = message.getCharacter();
+		//this.log().info("Hashing without letter " + cc);
+		List<String> passwordChars = message.getPasswordChars();
+		char[] tmpChars = new char[passwordChars.size()-1]; // heapPermutations needs a char array
+		int ii = 0;
+		for (String ct : passwordChars) {
+			if (!ct.equals(cc)) {
+				tmpChars[ii] = ct.toCharArray()[0]; // One letter String to char
+				ii++;
+			}
+		}
+		List<String> permutations = new ArrayList<String>();
+		this.heapPermutation(tmpChars, tmpChars.length, permutations); // permutations returned by reference
+
+		String phash = new String("");
+		Hashtable<String,String> output = new Hashtable<String,String>();
+		ii=0;
+		for (String perm : permutations) {
+			phash = this.hash(perm);
+			if (this.hintsHashes.contains(phash)) {
+				//this.log().info("Matching hashes: " + phash + " for " + perm);
+				output.put(phash,perm);
+			}
+			
+		}
+		this.sender().tell(new Master.HintMessage(output), this.self());
+	}
+	
+	private void handle(HintsHashesMessage message) {
+		this.hintsHashes = message.getAllHints();
+	}
+	
+	private void handle(CrackedHintsMessage message) {
+		//this.log().info("Worker receiving cracked hints");
+		this.crackedHints = message.getCrackedHints();
 	}
 	
 	private void handle(TaskMessage message) {
 		String[] task = message.getLine();
 		int id = Integer.parseInt(task[0]);
 		String name = task[1];
-		this.log().info("Received task for " + name);
 		char[] passwordChars = task[2].toCharArray();
 		int passwordLength = Integer.parseInt(task[3]);
 		String passwordHash = task[4];
+		
+		//this.log().info("Cracking " + name + ": " + passwordHash);
+		
 		List<String> hintsHashes = new ArrayList<String>();
 		for (int ii=5; ii < task.length; ii++) {
 			hintsHashes.add(task[ii]);
 			//this.log().info(task[ii]);
 		}
-		//Thread.sleep(100);
-		List<String> permutations = new ArrayList<String>();
-		List<Character> tmpList = new ArrayList<Character>();
-		char[] tmpChars = new char[passwordLength];
-		List<Character> notLetters = new ArrayList<Character>();
-		String phash = new String("");
-		for (char cc : passwordChars) {
-			int ii = 0;
-			for (char ct : passwordChars) {
-				if (ct != cc) {
-					tmpChars[ii] = ct;
-					ii++;
-				}
+		HashSet<Character> notLetters = new HashSet<Character>();
+		for (String hh : hintsHashes) {
+			if (this.crackedHints.containsKey(hh)) {
+				notLetters.add(this.findMissingLetter(passwordChars, this.crackedHints.get(hh).toCharArray()));
 			}
-			this.heapPermutation(tmpChars, passwordLength, permutations); // Returned by reference
-			
-			// TODO we need permutations from sets of 10 (not 11, remove one letter each time)
-			for (String perm : permutations) { // TODO cache permutations for each workers
-				phash = this.hash(perm);
-				for (String hint : hintsHashes) {
-					if (phash.equals(hint)) {
-						// Find missing letter
-						//this.log().info("phash equals hint");
-						//notLetters.add(this.findMissingLetter(passwordChars, perm.toCharArray()));
-						notLetters.add(cc);
-						hintsHashes.remove(hint);
-						break;
-					}
-				}
-				if (hintsHashes.size() == 0) {
-					break;
-				}
-			}
-			permutations.clear(); // To avoid running out of memory
 		}
 		
 		// Here be cracking!
 		// With a subset of letters only
 		String finalLetters = new String("");
+		String phash = new String("");
 		for (char cc : passwordChars) {
 			if (!notLetters.contains(cc)) {
 				finalLetters += cc;
 			}
 		}
-		this.log().info("Removed form hint letters " + name + " : " + notLetters);
-		this.log().info("Final letters " + name + " : " + finalLetters);
+		//this.log().info("Removed from hint letters " + name + " : " + notLetters);
+		//this.log().info("Final letters " + name + " : " + finalLetters);
 		if (finalLetters.length() > 3) {
 			String[] output = {name, "crashed"};
 			this.sender().tell(new Master.ResultMessage(output), this.self());
@@ -168,10 +206,18 @@ public class Worker extends AbstractLoggingActor {
 	}
 	
 	private char findMissingLetter(char[] alphabet, char[] target) {
+		boolean found = false;
 		for (char ii : alphabet) {
-			if (!Arrays.asList(target).contains(ii)) {
-				return ii;
+			for (char jj : target) {
+				if (ii == jj) {
+					found = true;
+					break;
+				}
 			}
+			if (!found) {
+				return(ii);
+			}
+			found = false;
 		}
 		return "".charAt(0); // Buggy but shouldn't be called anyway
 	}
