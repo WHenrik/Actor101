@@ -168,7 +168,7 @@ public class Master extends AbstractLoggingActor {
 	}
 	
 	protected void distribute() {
-		if (System.currentTimeMillis() - this.startTime > 240*1000) { // TODO Failsafe for testing
+		if (System.currentTimeMillis() - this.startTime > 240*1000) {
 			this.log().info("Early shutdown");
 			terminate();
 		}
@@ -178,11 +178,8 @@ public class Master extends AbstractLoggingActor {
 				return;
 			} else if (this.dataLoaded && !(this.toProcessChars.isEmpty() || this.toProcessID >= this.passwordChars.size())) {
 				String nextChar = this.toProcessChars.get(this.toProcessID);
-				//String nextChar = this.toProcessChars.get(0);
-				this.log().info("Selected: " + nextChar);
+				//this.log().info("Selected: " + nextChar);
 				this.toProcessID++;
-				//this.toProcessChars.remove(0);
-				//worker.tell(new Worker.HintsHashesMessage(this.allHints), this.self());
 				this.sendHintsHashes(worker);
 				//worker.tell(new Worker.HashMessage(nextChar, this.passwordChars), this.self());
 /*				for (int ii=0; ii < this.passwordChars.size(); ii++) {
@@ -195,13 +192,12 @@ public class Master extends AbstractLoggingActor {
 					post += cc;
 				}
 				worker.tell(new Worker.PasswordCharsMessage(post), this.self());
-				this.log().info("Sent PasswordChars: " + this.passwordChars.toString());
+				//this.log().info("Sent PasswordChars: " + this.passwordChars.toString());
 				worker.tell(new Worker.HashMessage(nextChar), this.self());
 				notFree.add(worker);
 			} else if (!this.toCrack.isEmpty() && this.crackedHints.size() == this.allHints.size()) { // Assumes all hints are unique TODO make unique allHints
-				worker.tell(new Worker.CrackedHintsMessage(this.crackedHints), this.self());
-				//worker.tell(new Worker.TaskMessage(this.toCrack.get(0)), this.self());
 				this.sendCrackedHints(worker);
+				worker.tell(new Worker.TaskMessage(this.toCrack.get(0)), this.self());
 				this.toCrack.remove(0);
 				notFree.add(worker);
 			}
@@ -219,7 +215,7 @@ public class Master extends AbstractLoggingActor {
 			if (ii % ConfigurationSingleton.get().getBufferSize() == 0) {
 				worker.tell(new Worker.HintsHashesMessage(tmp), this.self());
 				//this.log().info(tmp.size() + " hints sent");
-				tmp.clear();
+				tmp = new ArrayList<String>(); // Not clear as it passes by reference if on the same JVM
 			}
 			ii++;
 		}
@@ -233,7 +229,7 @@ public class Master extends AbstractLoggingActor {
 			tmp.put(key, this.crackedHints.get(key));
 			if (ii % ConfigurationSingleton.get().getBufferSize() == 0) {
 				worker.tell(new Worker.CrackedHintsMessage(tmp), this.self());
-				tmp.clear();
+				tmp = new Hashtable<String, String>(); // Not clear as it passes by reference if on the same JVM
 			}
 			ii++;
 		}

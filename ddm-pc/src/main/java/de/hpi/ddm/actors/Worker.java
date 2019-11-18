@@ -88,7 +88,7 @@ public class Worker extends AbstractLoggingActor {
 
 	private Member masterSystem;
 	private final Cluster cluster;
-	private List<String> allHints;
+	private HashSet<String> allHints;
 	private Hashtable<String,String> crackedHints;
 	private List<String> passwordChars;
 	
@@ -101,7 +101,7 @@ public class Worker extends AbstractLoggingActor {
 		Reaper.watchWithDefaultReaper(this);
 		
 		this.cluster.subscribe(this.self(), MemberUp.class, MemberRemoved.class);
-		this.allHints = new ArrayList<String>();
+		this.allHints = new HashSet<String>();
 		this.crackedHints = new Hashtable<String,String>();
 		this.passwordChars = new ArrayList<String>();
 	}
@@ -143,11 +143,11 @@ public class Worker extends AbstractLoggingActor {
 
 	private void handle(HashMessage message) {
 		String cc = message.getCharacter();
-		this.log().info("Number of hints of worker:"+ this.allHints.size());
+		//this.log().info("Number of hints of worker:"+ this.allHints.size());
 		//this.log().info("Hashing without letter " + cc);
 		//List<String> passwordChars = new ArrayList<String>(message.getPasswordChars());
 		List<String> passwordChars = this.passwordChars;
-		this.log().info("PasswordChars: " + passwordChars.toString());
+		//this.log().info("PasswordChars: " + passwordChars.toString());
 		char[] tmpChars = new char[passwordChars.size()-1]; // heapPermutations needs a char array
 		int ii = 0;
 		for (String ct : passwordChars) {
@@ -176,10 +176,7 @@ public class Worker extends AbstractLoggingActor {
 	private void handle(HintsHashesMessage message) {
 		//this.allHints = message.getAllHints();
 		List<String> tmp = new ArrayList<String>(message.getAllHints());
-		//this.log().info("Received hashes " + tmp.toString());
-		this.log().info("Received hashes " + tmp.size());
-		this.log().info("From hashes " + message.getAllHints().size());
-		//this.log().info("Reading hints hashes...");
+		//this.log().info("Received hashes " + tmp.size());
 		for (String ee : tmp) {
 			this.allHints.add(ee);
 		}
