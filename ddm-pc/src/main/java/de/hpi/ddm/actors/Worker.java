@@ -63,9 +63,10 @@ public class Worker extends AbstractLoggingActor {
 	}
 	
 	@Data @NoArgsConstructor @AllArgsConstructor
-	public static class PasswordChars implements Serializable {
+	public static class PasswordCharsMessage implements Serializable {
 		private static final long serialVersionUID = 8163558040091664272L;
-		private List<String> passwordChars;
+		//private List<String> passwordChars;
+		private String passwordChars;
 	}
 	
 	@Data @NoArgsConstructor @AllArgsConstructor
@@ -87,7 +88,7 @@ public class Worker extends AbstractLoggingActor {
 
 	private Member masterSystem;
 	private final Cluster cluster;
-	private List<String> hintsHashes;
+	private List<String> allHints;
 	private Hashtable<String,String> crackedHints;
 	private List<String> passwordChars;
 	
@@ -100,7 +101,7 @@ public class Worker extends AbstractLoggingActor {
 		Reaper.watchWithDefaultReaper(this);
 		
 		this.cluster.subscribe(this.self(), MemberUp.class, MemberRemoved.class);
-		this.hintsHashes = new ArrayList<String>();
+		this.allHints = new ArrayList<String>();
 		this.crackedHints = new Hashtable<String,String>();
 		this.passwordChars = new ArrayList<String>();
 	}
@@ -122,20 +123,28 @@ public class Worker extends AbstractLoggingActor {
 				.match(MemberRemoved.class, this::handle)
 				.match(TaskMessage.class, this::handle)
 				.match(HashMessage.class, this::handle)
-				.match(PasswordChars.class, this::handle)
+				.match(PasswordCharsMessage.class, this::handle)
 				.match(HintsHashesMessage.class, this::handle)
 				.match(CrackedHintsMessage.class, this::handle)
 				.matchAny(object -> this.log().info("Received unknown message: \"{}\"", object.toString()))
 				.build();
 	}
 	
-	private void handle(PasswordChars message) {
-		this.passwordChars = new ArrayList<String>(message.getPasswordChars());
+	private void handle(PasswordCharsMessage message) {
+		//this.log().info("Reading passwordChars...");
+		//List<String> tmp = new ArrayList<String>(message.getPasswordChars());
+		this.passwordChars = new ArrayList<String>();
+		for (char cc: message.getPasswordChars().toCharArray()) {
+			this.passwordChars.add(String.valueOf(cc));
+		}
+		//this.log().info("Received passwordChars: " + tmp.toString());
+		//this.passwordChars = tmp;
 	}
 
 	private void handle(HashMessage message) {
 		String cc = message.getCharacter();
-		this.log().info("Hashing without letter " + cc);
+		this.log().info("Number of hints of worker:"+ this.allHints.size());
+		//this.log().info("Hashing without letter " + cc);
 		//List<String> passwordChars = new ArrayList<String>(message.getPasswordChars());
 		List<String> passwordChars = this.passwordChars;
 		this.log().info("PasswordChars: " + passwordChars.toString());
@@ -155,7 +164,7 @@ public class Worker extends AbstractLoggingActor {
 		ii=0;
 		for (String perm : permutations) {
 			phash = this.hash(perm);
-			if (this.hintsHashes.contains(phash)) {
+			if (this.allHints.contains(phash)) {
 				//this.log().info("Matching hashes: " + phash + " for " + perm);
 				output.put(phash,perm);
 			}
@@ -165,11 +174,14 @@ public class Worker extends AbstractLoggingActor {
 	}
 	
 	private void handle(HintsHashesMessage message) {
-		//this.hintsHashes = message.getAllHints();
+		//this.allHints = message.getAllHints();
 		List<String> tmp = new ArrayList<String>(message.getAllHints());
 		//this.log().info("Received hashes " + tmp.toString());
+		this.log().info("Received hashes " + tmp.size());
+		this.log().info("From hashes " + message.getAllHints().size());
+		//this.log().info("Reading hints hashes...");
 		for (String ee : tmp) {
-			this.hintsHashes.add(ee);
+			this.allHints.add(ee);
 		}
 	}
 	

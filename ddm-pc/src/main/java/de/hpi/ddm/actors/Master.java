@@ -4,8 +4,8 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.ArrayList;
 import java.util.Hashtable;
+import java.util.HashSet;
 
 import akka.actor.AbstractLoggingActor;
 import akka.actor.ActorRef;
@@ -35,8 +35,9 @@ public class Master extends AbstractLoggingActor {
 		this.workers = new ArrayList<>();
 		this.freeWorkers = new ArrayList<>();
 
-		this.toCrack = new ArrayList<>();
-		this.allHints = new ArrayList<>();
+		this.toCrack = new ArrayList<String[]>();
+		this.allHints = new HashSet<String>();
+		//this.allHints = new ArrayList<String>();
 	}
 
 	////////////////////
@@ -82,7 +83,8 @@ public class Master extends AbstractLoggingActor {
 
 	private long startTime;
 	private List<String[]> toCrack;
-	private List<String> allHints;
+	private HashSet<String> allHints;
+//	private List<String> allHints;
 	private Hashtable<String, String> crackedHints;
 	private List<String> passwordChars;
 	private List<String> toProcessChars;
@@ -125,7 +127,8 @@ public class Master extends AbstractLoggingActor {
 		this.reader.tell(new Reader.ReadMessage(), this.self());
 
 		this.crackedHints = new Hashtable<String, String>();
-		this.allHints = new ArrayList<String>();
+		this.allHints = new HashSet<String>();
+		//this.allHints = new ArrayList<String>();
 		this.toCrack = new ArrayList<String[]>();
 	}
 	
@@ -143,6 +146,7 @@ public class Master extends AbstractLoggingActor {
 			this.collector.tell(new Collector.PrintMessage(), this.self());
 			this.dataLoaded = true;
 			//this.log().info("Hints to crack:" + allHints.toString());
+			this.log().info("Hints to crack:" + allHints.size());
 			this.distribute();
 			//this.terminate();
 			return;
@@ -170,16 +174,28 @@ public class Master extends AbstractLoggingActor {
 		}
 		List<ActorRef> notFree = new ArrayList<ActorRef>();
 		for (ActorRef worker : this.freeWorkers) {
-			if (this.dataLoaded && !(this.toProcessChars.isEmpty() || this.toProcessID >= this.passwordChars.size())) {
+			if (!this.dataLoaded) {
+				return;
+			} else if (this.dataLoaded && !(this.toProcessChars.isEmpty() || this.toProcessID >= this.passwordChars.size())) {
 				String nextChar = this.toProcessChars.get(this.toProcessID);
 				//String nextChar = this.toProcessChars.get(0);
-				//this.log().info("Selected: " + nextChar);
+				this.log().info("Selected: " + nextChar);
 				this.toProcessID++;
 				//this.toProcessChars.remove(0);
 				//worker.tell(new Worker.HintsHashesMessage(this.allHints), this.self());
 				this.sendHintsHashes(worker);
 				//worker.tell(new Worker.HashMessage(nextChar, this.passwordChars), this.self());
-				worker.tell(new Worker.PasswordChars(this.passwordChars), this.self());
+/*				for (int ii=0; ii < this.passwordChars.size(); ii++) {
+					this.passwordChars.set(ii, "test");
+				}
+				worker.tell(new Worker.PasswordCharsMessage(this.passwordChars), this.self());
+				*/
+				String post = new String("");
+				for (String cc: this.passwordChars) {
+					post += cc;
+				}
+				worker.tell(new Worker.PasswordCharsMessage(post), this.self());
+				this.log().info("Sent PasswordChars: " + this.passwordChars.toString());
 				worker.tell(new Worker.HashMessage(nextChar), this.self());
 				notFree.add(worker);
 			} else if (!this.toCrack.isEmpty() && this.crackedHints.size() == this.allHints.size()) { // Assumes all hints are unique TODO make unique allHints
@@ -196,16 +212,18 @@ public class Master extends AbstractLoggingActor {
 	}
 	
 	protected void sendHintsHashes(ActorRef worker) {
-		int ii = 0;
+		int ii = 1;
 		List<String> tmp = new ArrayList<String>();
 		for (String hh : this.allHints) {
 			tmp.add(hh);
 			if (ii % ConfigurationSingleton.get().getBufferSize() == 0) {
 				worker.tell(new Worker.HintsHashesMessage(tmp), this.self());
+				//this.log().info(tmp.size() + " hints sent");
 				tmp.clear();
 			}
 			ii++;
 		}
+		worker.tell(new Worker.HintsHashesMessage(tmp), this.self());
 	}
 	
 	protected void sendCrackedHints(ActorRef worker) {
@@ -219,15 +237,16 @@ public class Master extends AbstractLoggingActor {
 			}
 			ii++;
 		}
+		worker.tell(new Worker.CrackedHintsMessage(tmp), this.self());
 	}
 	
 	protected void handle(HintMessage message) {
 		Hashtable<String,String> hintsCracks = message.getCrackedHints();
-		//this.log().info("Getting cracked hints back (crackedHints : " + this.crackedHints.size() + ", allHints : " + this.allHints.size() + ")");
 		for (String key : hintsCracks.keySet()) {
 			this.crackedHints.put(key, hintsCracks.get(key));
 		}
-
+		this.log().info("Getting cracked hints back (crackedHints : " + this.crackedHints.size() + ", allHints : " + this.allHints.size() + ")");
+		
 		this.freeWorkers.add(this.sender());
 		this.distribute();
 	}
