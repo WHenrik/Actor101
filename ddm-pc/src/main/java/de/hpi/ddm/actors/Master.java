@@ -12,6 +12,7 @@ import akka.actor.ActorRef;
 import akka.actor.PoisonPill;
 import akka.actor.Props;
 import akka.actor.Terminated;
+import de.hpi.ddm.configuration.ConfigurationSingleton;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -122,6 +123,10 @@ public class Master extends AbstractLoggingActor {
 		this.toProcessChars = new ArrayList<String>();
 		this.toProcessID = 0;
 		this.reader.tell(new Reader.ReadMessage(), this.self());
+
+		this.crackedHints = new Hashtable<String, String>();
+		this.allHints = new ArrayList<String>();
+		this.toCrack = new ArrayList<String[]>();
 	}
 	
 	protected void handle(BatchMessage message) {
@@ -136,7 +141,6 @@ public class Master extends AbstractLoggingActor {
 		///////////////////////////////////////////////////////////////////////////////////////////////////////
 		if (message.getLines().isEmpty()) {
 			this.collector.tell(new Collector.PrintMessage(), this.self());
-			this.crackedHints = new Hashtable<String, String>();
 			this.dataLoaded = true;
 			//this.log().info("Hints to crack:" + allHints.toString());
 			this.distribute();
@@ -172,18 +176,48 @@ public class Master extends AbstractLoggingActor {
 				//this.log().info("Selected: " + nextChar);
 				this.toProcessID++;
 				//this.toProcessChars.remove(0);
-				worker.tell(new Worker.HintsHashesMessage(this.allHints), this.self());
-				worker.tell(new Worker.HashMessage(nextChar, this.passwordChars), this.self());
+				//worker.tell(new Worker.HintsHashesMessage(this.allHints), this.self());
+				this.sendHintsHashes(worker);
+				//worker.tell(new Worker.HashMessage(nextChar, this.passwordChars), this.self());
+				worker.tell(new Worker.PasswordChars(this.passwordChars), this.self());
+				worker.tell(new Worker.HashMessage(nextChar), this.self());
 				notFree.add(worker);
 			} else if (!this.toCrack.isEmpty() && this.crackedHints.size() == this.allHints.size()) { // Assumes all hints are unique TODO make unique allHints
 				worker.tell(new Worker.CrackedHintsMessage(this.crackedHints), this.self());
-				worker.tell(new Worker.TaskMessage(this.toCrack.get(0)), this.self());
+				//worker.tell(new Worker.TaskMessage(this.toCrack.get(0)), this.self());
+				this.sendCrackedHints(worker);
 				this.toCrack.remove(0);
 				notFree.add(worker);
 			}
 		}
 		for (ActorRef worker : notFree) {
 			this.freeWorkers.remove(worker);
+		}
+	}
+	
+	protected void sendHintsHashes(ActorRef worker) {
+		int ii = 0;
+		List<String> tmp = new ArrayList<String>();
+		for (String hh : this.allHints) {
+			tmp.add(hh);
+			if (ii % ConfigurationSingleton.get().getBufferSize() == 0) {
+				worker.tell(new Worker.HintsHashesMessage(tmp), this.self());
+				tmp.clear();
+			}
+			ii++;
+		}
+	}
+	
+	protected void sendCrackedHints(ActorRef worker) {
+		int ii = 0;
+		Hashtable<String,String> tmp = new Hashtable<String,String>();
+		for (String key : this.crackedHints.keySet()) {
+			tmp.put(key, this.crackedHints.get(key));
+			if (ii % ConfigurationSingleton.get().getBufferSize() == 0) {
+				worker.tell(new Worker.CrackedHintsMessage(tmp), this.self());
+				tmp.clear();
+			}
+			ii++;
 		}
 	}
 	

@@ -6,6 +6,9 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
 import java.util.ListIterator;
+
+import org.apache.commons.lang3.SerializationUtils;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Hashtable;
@@ -56,6 +59,12 @@ public class Worker extends AbstractLoggingActor {
 	public static class HashMessage implements Serializable {
 		private static final long serialVersionUID = 6560207097470814017L;
 		private String character;
+		//private List<String> passwordChars;
+	}
+	
+	@Data @NoArgsConstructor @AllArgsConstructor
+	public static class PasswordChars implements Serializable {
+		private static final long serialVersionUID = 8163558040091664272L;
 		private List<String> passwordChars;
 	}
 	
@@ -80,6 +89,7 @@ public class Worker extends AbstractLoggingActor {
 	private final Cluster cluster;
 	private List<String> hintsHashes;
 	private Hashtable<String,String> crackedHints;
+	private List<String> passwordChars;
 	
 	/////////////////////
 	// Actor Lifecycle //
@@ -90,6 +100,9 @@ public class Worker extends AbstractLoggingActor {
 		Reaper.watchWithDefaultReaper(this);
 		
 		this.cluster.subscribe(this.self(), MemberUp.class, MemberRemoved.class);
+		this.hintsHashes = new ArrayList<String>();
+		this.crackedHints = new Hashtable<String,String>();
+		this.passwordChars = new ArrayList<String>();
 	}
 
 	@Override
@@ -109,16 +122,23 @@ public class Worker extends AbstractLoggingActor {
 				.match(MemberRemoved.class, this::handle)
 				.match(TaskMessage.class, this::handle)
 				.match(HashMessage.class, this::handle)
+				.match(PasswordChars.class, this::handle)
 				.match(HintsHashesMessage.class, this::handle)
 				.match(CrackedHintsMessage.class, this::handle)
 				.matchAny(object -> this.log().info("Received unknown message: \"{}\"", object.toString()))
 				.build();
 	}
+	
+	private void handle(PasswordChars message) {
+		this.passwordChars = new ArrayList<String>(message.getPasswordChars());
+	}
 
 	private void handle(HashMessage message) {
 		String cc = message.getCharacter();
-		//this.log().info("Hashing without letter " + cc);
-		List<String> passwordChars = message.getPasswordChars();
+		this.log().info("Hashing without letter " + cc);
+		//List<String> passwordChars = new ArrayList<String>(message.getPasswordChars());
+		List<String> passwordChars = this.passwordChars;
+		this.log().info("PasswordChars: " + passwordChars.toString());
 		char[] tmpChars = new char[passwordChars.size()-1]; // heapPermutations needs a char array
 		int ii = 0;
 		for (String ct : passwordChars) {
@@ -145,12 +165,21 @@ public class Worker extends AbstractLoggingActor {
 	}
 	
 	private void handle(HintsHashesMessage message) {
-		this.hintsHashes = message.getAllHints();
+		//this.hintsHashes = message.getAllHints();
+		List<String> tmp = new ArrayList<String>(message.getAllHints());
+		//this.log().info("Received hashes " + tmp.toString());
+		for (String ee : tmp) {
+			this.hintsHashes.add(ee);
+		}
 	}
 	
 	private void handle(CrackedHintsMessage message) {
 		//this.log().info("Worker receiving cracked hints");
-		this.crackedHints = message.getCrackedHints();
+		//this.crackedHints = message.getCrackedHints();
+		Hashtable<String,String> tmpCrackedHints = message.getCrackedHints();
+		for (String key : tmpCrackedHints.keySet()) {
+			this.crackedHints.put(key, tmpCrackedHints.get(key));
+		}
 	}
 	
 	private void handle(TaskMessage message) {
