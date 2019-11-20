@@ -131,23 +131,15 @@ public class Worker extends AbstractLoggingActor {
 	}
 	
 	private void handle(PasswordCharsMessage message) {
-		//this.log().info("Reading passwordChars...");
-		//List<String> tmp = new ArrayList<String>(message.getPasswordChars());
 		this.passwordChars = new ArrayList<String>();
 		for (char cc: message.getPasswordChars().toCharArray()) {
 			this.passwordChars.add(String.valueOf(cc));
 		}
-		//this.log().info("Received passwordChars: " + tmp.toString());
-		//this.passwordChars = tmp;
 	}
 
 	private void handle(HashMessage message) {
 		String cc = message.getCharacter();
-		//this.log().info("Number of hints of worker:"+ this.allHints.size());
-		//this.log().info("Hashing without letter " + cc);
-		//List<String> passwordChars = new ArrayList<String>(message.getPasswordChars());
 		List<String> passwordChars = this.passwordChars;
-		//this.log().info("PasswordChars: " + passwordChars.toString());
 		char[] tmpChars = new char[passwordChars.size()-1]; // heapPermutations needs a char array
 		int ii = 0;
 		for (String ct : passwordChars) {
@@ -165,7 +157,6 @@ public class Worker extends AbstractLoggingActor {
 		for (String perm : permutations) {
 			phash = this.hash(perm);
 			if (this.allHints.contains(phash)) {
-				//this.log().info("Matching hashes: " + phash + " for " + perm);
 				output.put(phash,perm);
 			}
 			
@@ -174,17 +165,13 @@ public class Worker extends AbstractLoggingActor {
 	}
 	
 	private void handle(HintsHashesMessage message) {
-		//this.allHints = message.getAllHints();
 		List<String> tmp = new ArrayList<String>(message.getAllHints());
-		//this.log().info("Received hashes " + tmp.size());
 		for (String ee : tmp) {
 			this.allHints.add(ee);
 		}
 	}
 	
 	private void handle(CrackedHintsMessage message) {
-		//this.log().info("Worker receiving cracked hints");
-		//this.crackedHints = message.getCrackedHints();
 		Hashtable<String,String> tmpCrackedHints = message.getCrackedHints();
 		for (String key : tmpCrackedHints.keySet()) {
 			this.crackedHints.put(key, tmpCrackedHints.get(key));
@@ -198,13 +185,10 @@ public class Worker extends AbstractLoggingActor {
 		char[] passwordChars = task[2].toCharArray();
 		int passwordLength = Integer.parseInt(task[3]);
 		String passwordHash = task[4];
-		
-		//this.log().info("Cracking " + name + ": " + passwordHash);
-		
+				
 		List<String> hintsHashes = new ArrayList<String>();
 		for (int ii=5; ii < task.length; ii++) {
 			hintsHashes.add(task[ii]);
-			//this.log().info(task[ii]);
 		}
 		HashSet<Character> notLetters = new HashSet<Character>();
 		for (String hh : hintsHashes) {
@@ -222,8 +206,6 @@ public class Worker extends AbstractLoggingActor {
 				finalLetters += cc;
 			}
 		}
-		//this.log().info("Removed from hint letters " + name + " : " + notLetters);
-		//this.log().info("Final letters " + name + " : " + finalLetters);
 		if (finalLetters.length() > 3) {
 			String[] output = {name, "crashed"};
 			this.sender().tell(new Master.ResultMessage(output), this.self());
@@ -237,7 +219,6 @@ public class Worker extends AbstractLoggingActor {
 				return;
 			}
 		}
-		
 		
 		String[] output = {name, "randomPassword"};
 		this.sender().tell(new Master.ResultMessage(output), this.self());
@@ -330,7 +311,7 @@ public class Worker extends AbstractLoggingActor {
 	}
 	
 
-	// https://www.geeksforgeeks.org/print-all-combinations-of-given-length/
+	// Modified from https://www.geeksforgeeks.org/print-all-combinations-of-given-length/
 	private List<String> generateAllKLength(char[] set, int k) 
 	{ 
 	    int n = set.length;  

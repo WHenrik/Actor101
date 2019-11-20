@@ -124,78 +124,59 @@ public class Master extends AbstractLoggingActor {
 		this.passwordChars = new ArrayList<String>();
 		this.toProcessChars = new ArrayList<String>();
 		this.toProcessID = 0;
-		this.reader.tell(new Reader.ReadMessage(), this.self());
-
+		
 		this.crackedHints = new Hashtable<String, String>();
 		this.allHints = new HashSet<String>();
-		//this.allHints = new ArrayList<String>();
 		this.toCrack = new ArrayList<String[]>();
+		
+		this.reader.tell(new Reader.ReadMessage(), this.self()); // Start the reader
 	}
 	
 	protected void handle(BatchMessage message) {
 		// Load all password and hints
 		// Ask the workers to crack the hashes once all the data are loaded
 		
-		///////////////////////////////////////////////////////////////////////////////////////////////////////
-		// The input file is read in batches for two reasons: /////////////////////////////////////////////////
-		// 1. If we distribute the batches early, we might not need to hold the entire input data in memory. //
-		// 2. If we process the batches early, we can achieve latency hiding. /////////////////////////////////
-		// TODO: Implement the processing of the data for the concrete assignment. ////////////////////////////
-		///////////////////////////////////////////////////////////////////////////////////////////////////////
 		if (message.getLines().isEmpty()) {
-			this.collector.tell(new Collector.PrintMessage(), this.self());
 			this.dataLoaded = true;
-			//this.log().info("Hints to crack:" + allHints.toString());
-			this.log().info("Hints to crack:" + allHints.size());
 			this.distribute();
-			//this.terminate();
 			return;
 		}
 		
 		for (String[] line : message.getLines()) {
-			//System.out.println(Arrays.toString(line));
 			toCrack.add(line);
 			for (int ii=5; ii < line.length; ii++) {
 				allHints.add(line[ii]);
 			}
 		}
+		// This only need to be done once but has a negligible cost so...
 		this.passwordChars = Arrays.asList(toCrack.get(0)[2].split(""));
 		this.toProcessChars = Arrays.asList(toCrack.get(0)[2].split(""));
 		
-		
-		this.collector.tell(new Collector.CollectMessage("Processed batch of size " + message.getLines().size()), this.self());
 		this.reader.tell(new Reader.ReadMessage(), this.self());
 	}
 	
 	protected void distribute() {
-		if (System.currentTimeMillis() - this.startTime > 240*1000) {
-			this.log().info("Early shutdown");
-			terminate();
-		}
+		// Main "thought" routine of the master, distribute the jobs and controls that intermediate steps are completed
 		List<ActorRef> notFree = new ArrayList<ActorRef>();
 		for (ActorRef worker : this.freeWorkers) {
 			if (!this.dataLoaded) {
 				return;
-			} else if (this.dataLoaded && !(this.toProcessChars.isEmpty() || this.toProcessID >= this.passwordChars.size())) {
+			} else if (this.dataLoaded && this.toProcessID < this.passwordChars.size()) {
+				// Crack the hints first
 				String nextChar = this.toProcessChars.get(this.toProcessID);
-				//this.log().info("Selected: " + nextChar);
 				this.toProcessID++;
 				this.sendHintsHashes(worker);
-				//worker.tell(new Worker.HashMessage(nextChar, this.passwordChars), this.self());
-/*				for (int ii=0; ii < this.passwordChars.size(); ii++) {
-					this.passwordChars.set(ii, "test");
-				}
-				worker.tell(new Worker.PasswordCharsMessage(this.passwordChars), this.self());
-				*/
+				/* Convert the List<String> (one character strings) into a String to send to the workers, as the original List<String>
+				cannot be deserialized by Kryos for unknown reasons*/
 				String post = new String("");
 				for (String cc: this.passwordChars) {
 					post += cc;
 				}
 				worker.tell(new Worker.PasswordCharsMessage(post), this.self());
-				//this.log().info("Sent PasswordChars: " + this.passwordChars.toString());
 				worker.tell(new Worker.HashMessage(nextChar), this.self());
 				notFree.add(worker);
-			} else if (!this.toCrack.isEmpty() && this.crackedHints.size() == this.allHints.size()) { // Assumes all hints are unique TODO make unique allHints
+			} else if (!this.toCrack.isEmpty() && this.crackedHints.size() == this.allHints.size()) {
+				// Crack the passwords once the hints have been cracked
 				this.sendCrackedHints(worker);
 				worker.tell(new Worker.TaskMessage(this.toCrack.get(0)), this.self());
 				this.toCrack.remove(0);
@@ -214,8 +195,7 @@ public class Master extends AbstractLoggingActor {
 			tmp.add(hh);
 			if (ii % ConfigurationSingleton.get().getBufferSize() == 0) {
 				worker.tell(new Worker.HintsHashesMessage(tmp), this.self());
-				//this.log().info(tmp.size() + " hints sent");
-				tmp = new ArrayList<String>(); // Not clear as it passes by reference if on the same JVM
+				tmp = new ArrayList<String>(); // Not clear() as it passes by reference if on the same JVM
 			}
 			ii++;
 		}
@@ -229,7 +209,7 @@ public class Master extends AbstractLoggingActor {
 			tmp.put(key, this.crackedHints.get(key));
 			if (ii % ConfigurationSingleton.get().getBufferSize() == 0) {
 				worker.tell(new Worker.CrackedHintsMessage(tmp), this.self());
-				tmp = new Hashtable<String, String>(); // Not clear as it passes by reference if on the same JVM
+				tmp = new Hashtable<String, String>(); // Not clear() as it passes by reference if on the same JVM
 			}
 			ii++;
 		}
@@ -241,7 +221,6 @@ public class Master extends AbstractLoggingActor {
 		for (String key : hintsCracks.keySet()) {
 			this.crackedHints.put(key, hintsCracks.get(key));
 		}
-		this.log().info("Getting cracked hints back (crackedHints : " + this.crackedHints.size() + ", allHints : " + this.allHints.size() + ")");
 		
 		this.freeWorkers.add(this.sender());
 		this.distribute();
@@ -251,14 +230,11 @@ public class Master extends AbstractLoggingActor {
 	protected void handle(ResultMessage message) {
 		String name = message.getResult()[0];
 		String password = message.getResult()[1];
-		//this.log().info("Cracked " + name + ": " + password);
-		collector.tell(new Collector.CollectMessage("Cracked " + name + ": " + password), this.self());
+		collector.tell(new Collector.CollectMessage(password), this.self());
 		
 		this.freeWorkers.add(this.sender());
 		
 		if (this.toCrack.isEmpty() && this.freeWorkers.size() == this.workers.size()) {
-			this.log().info("Terminated because empty and done: " + String.valueOf(this.toCrack.size()));
-			this.collector.tell(new Collector.PrintMessage(), this.self());
 			this.terminate();
 		}
 		this.distribute();
@@ -266,6 +242,7 @@ public class Master extends AbstractLoggingActor {
 	
 	protected void terminate() {
 		this.reader.tell(PoisonPill.getInstance(), ActorRef.noSender());
+		this.collector.tell(new Collector.PrintMessage(), this.self());
 		this.collector.tell(PoisonPill.getInstance(), ActorRef.noSender());
 		
 		for (ActorRef worker : this.workers) {
@@ -284,13 +261,11 @@ public class Master extends AbstractLoggingActor {
 		this.workers.add(this.sender());
 		this.freeWorkers.add(this.sender());
 		this.distribute();
-//		this.log().info("Registered {}", this.sender());
 	}
 	
 	protected void handle(Terminated message) {
 		this.context().unwatch(message.getActor());
 		this.workers.remove(message.getActor());
 		this.freeWorkers.remove(message.getActor());
-//		this.log().info("Unregistered {}", message.getActor());
 	}
 }
