@@ -117,7 +117,6 @@ public class LargeMessageProxy extends AbstractLoggingActor {
 			Object mes = serialization.deserialize(messageBuffer.toByteArray(), message.serializerID, message.manifest).get();
 			message.getReceiver().tell(mes, message.getSender());
 			messageBuffer.reset();
-			System.out.println("AKKAMACHTSPAß");
 		}
 	}
 }
