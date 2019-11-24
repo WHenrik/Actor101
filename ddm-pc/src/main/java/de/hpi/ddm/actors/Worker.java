@@ -1,9 +1,18 @@
 package de.hpi.ddm.actors;
 
+import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
+import java.util.ListIterator;
+
+import org.apache.commons.lang3.SerializationUtils;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Hashtable;
+import java.util.HashSet;
 
 import akka.actor.AbstractLoggingActor;
 import akka.actor.ActorRef;
@@ -16,6 +25,9 @@ import akka.cluster.ClusterEvent.MemberUp;
 import akka.cluster.Member;
 import akka.cluster.MemberStatus;
 import de.hpi.ddm.MasterSystem;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 public class Worker extends AbstractLoggingActor {
 
@@ -36,6 +48,39 @@ public class Worker extends AbstractLoggingActor {
 	////////////////////
 	// Actor Messages //
 	////////////////////
+	
+	@Data @NoArgsConstructor @AllArgsConstructor
+	public static class TaskMessage implements Serializable {
+		private static final long serialVersionUID = 8343040942748609598L;
+		private String[] line;
+	}
+	
+	@Data @NoArgsConstructor @AllArgsConstructor
+	public static class HashMessage implements Serializable {
+		private static final long serialVersionUID = 6560207097470814017L;
+		private String character;
+		//private List<String> passwordChars;
+	}
+	
+	@Data @NoArgsConstructor @AllArgsConstructor
+	public static class PasswordCharsMessage implements Serializable {
+		private static final long serialVersionUID = 8163558040091664272L;
+		//private List<String> passwordChars;
+		private String passwordChars;
+	}
+	
+	@Data @NoArgsConstructor @AllArgsConstructor
+	public static class HintsHashesMessage implements Serializable {
+		private static final long serialVersionUID = -7425329313563534330L;
+		private List<String> allHints;
+	}
+
+	@Data @NoArgsConstructor @AllArgsConstructor
+	public static class CrackedHintsMessage implements Serializable {
+		private static final long serialVersionUID = -719107220168245254L;
+		private Hashtable<String,String> crackedHints;
+	}
+
 
 	/////////////////
 	// Actor State //
@@ -43,6 +88,9 @@ public class Worker extends AbstractLoggingActor {
 
 	private Member masterSystem;
 	private final Cluster cluster;
+	private HashSet<String> allHints;
+	private Hashtable<String,String> crackedHints;
+	private List<String> passwordChars;
 	
 	/////////////////////
 	// Actor Lifecycle //
@@ -53,6 +101,9 @@ public class Worker extends AbstractLoggingActor {
 		Reaper.watchWithDefaultReaper(this);
 		
 		this.cluster.subscribe(this.self(), MemberUp.class, MemberRemoved.class);
+		this.allHints = new HashSet<String>();
+		this.crackedHints = new Hashtable<String,String>();
+		this.passwordChars = new ArrayList<String>();
 	}
 
 	@Override
@@ -70,8 +121,124 @@ public class Worker extends AbstractLoggingActor {
 				.match(CurrentClusterState.class, this::handle)
 				.match(MemberUp.class, this::handle)
 				.match(MemberRemoved.class, this::handle)
+				.match(TaskMessage.class, this::handle)
+				.match(HashMessage.class, this::handle)
+				.match(PasswordCharsMessage.class, this::handle)
+				.match(HintsHashesMessage.class, this::handle)
+				.match(CrackedHintsMessage.class, this::handle)
 				.matchAny(object -> this.log().info("Received unknown message: \"{}\"", object.toString()))
 				.build();
+	}
+	
+	private void handle(PasswordCharsMessage message) {
+		this.passwordChars = new ArrayList<String>();
+		for (char cc: message.getPasswordChars().toCharArray()) {
+			this.passwordChars.add(String.valueOf(cc));
+		}
+	}
+
+	private void handle(HashMessage message) {
+		String cc = message.getCharacter();
+		List<String> passwordChars = this.passwordChars;
+		char[] tmpChars = new char[passwordChars.size()-1]; // heapPermutations needs a char array
+		int ii = 0;
+		for (String ct : passwordChars) {
+			if (!ct.equals(cc)) {
+				tmpChars[ii] = ct.toCharArray()[0]; // One letter String to char
+				ii++;
+			}
+		}
+		List<String> permutations = new ArrayList<String>();
+		this.heapPermutation(tmpChars, tmpChars.length, permutations); // permutations returned by reference
+
+		String phash = new String("");
+		Hashtable<String,String> output = new Hashtable<String,String>();
+		ii=0;
+		for (String perm : permutations) {
+			phash = this.hash(perm);
+			if (this.allHints.contains(phash)) {
+				output.put(phash,perm);
+			}
+			
+		}
+		this.sender().tell(new Master.HintMessage(output), this.self());
+	}
+	
+	private void handle(HintsHashesMessage message) {
+		List<String> tmp = new ArrayList<String>(message.getAllHints());
+		for (String ee : tmp) {
+			this.allHints.add(ee);
+		}
+	}
+	
+	private void handle(CrackedHintsMessage message) {
+		Hashtable<String,String> tmpCrackedHints = message.getCrackedHints();
+		for (String key : tmpCrackedHints.keySet()) {
+			this.crackedHints.put(key, tmpCrackedHints.get(key));
+		}
+	}
+	
+	private void handle(TaskMessage message) {
+		String[] task = message.getLine();
+		int id = Integer.parseInt(task[0]);
+		String name = task[1];
+		char[] passwordChars = task[2].toCharArray();
+		int passwordLength = Integer.parseInt(task[3]);
+		String passwordHash = task[4];
+				
+		List<String> hintsHashes = new ArrayList<String>();
+		for (int ii=5; ii < task.length; ii++) {
+			hintsHashes.add(task[ii]);
+		}
+		HashSet<Character> notLetters = new HashSet<Character>();
+		for (String hh : hintsHashes) {
+			if (this.crackedHints.containsKey(hh)) {
+				notLetters.add(this.findMissingLetter(passwordChars, this.crackedHints.get(hh).toCharArray()));
+			}
+		}
+		
+		// Here be cracking!
+		// With a subset of letters only
+		String finalLetters = new String("");
+		String phash = new String("");
+		for (char cc : passwordChars) {
+			if (!notLetters.contains(cc)) {
+				finalLetters += cc;
+			}
+		}
+		if (finalLetters.length() > 3) {
+			String[] output = {name, "crashed"};
+			this.sender().tell(new Master.ResultMessage(output), this.self());
+			return;
+		}
+		for (String candidate : this.generateAllKLength(finalLetters.toCharArray(), passwordLength)) {
+			phash = this.hash(candidate);
+			if (phash.equals(passwordHash)) {
+				String[] output = {name, candidate};
+				this.sender().tell(new Master.ResultMessage(output), this.self());
+				return;
+			}
+		}
+		
+		String[] output = {name, "randomPassword"};
+		this.sender().tell(new Master.ResultMessage(output), this.self());
+	}
+	
+	private char findMissingLetter(char[] alphabet, char[] target) {
+		boolean found = false;
+		for (char ii : alphabet) {
+			for (char jj : target) {
+				if (ii == jj) {
+					found = true;
+					break;
+				}
+			}
+			if (!found) {
+				return(ii);
+			}
+			found = false;
+		}
+		return "".charAt(0); // Buggy but shouldn't be called anyway
 	}
 
 	private void handle(CurrentClusterState message) {
@@ -119,13 +286,13 @@ public class Worker extends AbstractLoggingActor {
 	// Generating all permutations of an array using Heap's Algorithm
 	// https://en.wikipedia.org/wiki/Heap's_algorithm
 	// https://www.geeksforgeeks.org/heaps-algorithm-for-generating-permutations/
-	private void heapPermutation(char[] a, int size, int n, List<String> l) {
+	private void heapPermutation(char[] a, int size, List<String> l) {
 		// If size is 1, store the obtained permutation
 		if (size == 1)
 			l.add(new String(a));
 
 		for (int i = 0; i < size; i++) {
-			heapPermutation(a, size - 1, n, l);
+			heapPermutation(a, size - 1, l);
 
 			// If size is odd, swap first and last element
 			if (size % 2 == 1) {
@@ -142,4 +309,35 @@ public class Worker extends AbstractLoggingActor {
 			}
 		}
 	}
+	
+
+	// Modified from https://www.geeksforgeeks.org/print-all-combinations-of-given-length/
+	private List<String> generateAllKLength(char[] set, int k) 
+	{ 
+	    int n = set.length;  
+	    return generateAllKLengthRec(set, "", n, k); 
+	}
+	
+	private List<String> generateAllKLengthRec(char[] set, String prefix, int n, int k) { 
+		// Base case: k is 0,
+		// print prefix 
+		List<String> output= new ArrayList<String>();
+		if (k == 0) {
+			output.add(prefix);
+			return output;
+		}
+		// One by one add all characters  
+		// from set and recursively  
+		// call for k equals to k-1
+		for (int i = 0; i < n; ++i) { 
+			// Next character of input added 
+			String newPrefix = prefix + set[i];  
+			// k is decreased, because  
+			// we have added a new character 
+			output.addAll(this.generateAllKLengthRec(set, newPrefix, n, k - 1));  
+		}
+		return(output);
+	}
+	
+	
 }
