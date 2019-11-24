@@ -17,9 +17,11 @@ file. Waits until all password have been cracked before progressing to 6.
 Worker
 
 Processes 2 kind of jobs:
+
 1. Hint cracking job: Generates all permutations from the password character minus the one letter sent, hash each permutation
 and compare it to the list of hints' hashes. Collects all cracked hints in a hashtable and sends it back to the master once
 all permutations' hashes have been compared.
+
 2. Password cracking job: Extracts the hint hashes from the password file's line and get the decrypted hints using the hashtable.
 Then excludes all the letters found from the hints from the password characters list and generates all combinations of this
 reduced list to hash and compare against the password hash. Returns the password as soon as it is cracked to the Master.
